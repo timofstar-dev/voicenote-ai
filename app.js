@@ -8,11 +8,13 @@ const $$ = (sel) => document.querySelectorAll(sel);
 
 // ============= Configuration =============
 const CONFIG = {
-    API_URL: 'https://api.anthropic.com/v1/messages',
-    API_VERSION: '2023-06-01',
-    DEFAULT_MODEL: 'claude-sonnet-4-20250514',
+    API_BASE: 'https://generativelanguage.googleapis.com/v1beta/models',
+    DEFAULT_MODEL: 'gemini-3.5-flash',
     DEFAULT_LANG: 'ko-KR',
     MAX_TOKENS: 4096,
+    DB_NAME: 'VoiceNoteAI',
+    DB_VERSION: 1,
+    STORE_NAME: 'recordings',
 };
 
 // ============= Application State =============
@@ -25,7 +27,11 @@ const state = {
     timerInterval: null,
     apiKey: localStorage.getItem('vnai_apiKey') || '',
     lang: localStorage.getItem('vnai_lang') || CONFIG.DEFAULT_LANG,
-    model: localStorage.getItem('vnai_model') || CONFIG.DEFAULT_MODEL,
+    model: (() => {
+        const saved = localStorage.getItem('vnai_model');
+        const validModels = ['gemini-3.5-flash'];
+        return (saved && validModels.includes(saved)) ? saved : CONFIG.DEFAULT_MODEL;
+    })(),
     results: null,
     activeTab: 'summary',
     recognition: null,
@@ -33,7 +39,62 @@ const state = {
     analyser: null,
     mediaStream: null,
     animFrameId: null,
+    // New: recording metadata
+    recordingTitle: '',
+    recordingDate: null,
+    // New: audio recording
+    mediaRecorder: null,
+    audioChunks: [],
+    audioBlob: null,
 };
+
+// ============= IndexedDB =============
+function openDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(CONFIG.DB_NAME, CONFIG.DB_VERSION);
+        request.onupgradeneeded = (e) => {
+            const db = e.target.result;
+            if (!db.objectStoreNames.contains(CONFIG.STORE_NAME)) {
+                db.createObjectStore(CONFIG.STORE_NAME, { keyPath: 'id' });
+            }
+        };
+        request.onsuccess = (e) => resolve(e.target.result);
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function saveRecord(record) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
+        tx.objectStore(CONFIG.STORE_NAME).put(record);
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function getAllRecords() {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(CONFIG.STORE_NAME, 'readonly');
+        const request = tx.objectStore(CONFIG.STORE_NAME).getAll();
+        request.onsuccess = () => {
+            const records = request.result.sort((a, b) => b.id - a.id);
+            resolve(records);
+        };
+        request.onerror = (e) => reject(e.target.error);
+    });
+}
+
+async function deleteRecord(id) {
+    const db = await openDB();
+    return new Promise((resolve, reject) => {
+        const tx = db.transaction(CONFIG.STORE_NAME, 'readwrite');
+        tx.objectStore(CONFIG.STORE_NAME).delete(id);
+        tx.oncomplete = () => resolve();
+        tx.onerror = (e) => reject(e.target.error);
+    });
+}
 
 // ============= Initialization =============
 document.addEventListener('DOMContentLoaded', () => {
@@ -43,6 +104,7 @@ document.addEventListener('DOMContentLoaded', () => {
     initRecording();
     initEditScreen();
     initResults();
+    initHistory();
     initInstallPrompt();
     updateTabIndicator();
     window.addEventListener('resize', updateTabIndicator);
@@ -115,6 +177,8 @@ $('#backBtn').addEventListener('click', () => {
         navigateTo('edit');
     } else if (state.currentScreen === 'loading') {
         navigateTo('edit');
+    } else if (state.currentScreen === 'history') {
+        navigateTo('record');
     }
 });
 
@@ -169,8 +233,33 @@ function initRecording() {
     editBtn.addEventListener('click', () => {
         $('#editArea').value = state.transcript;
         updateTextStats();
+        // Set recording date
+        state.recordingDate = new Date();
+        $('#recordDate').textContent = formatDate(state.recordingDate);
+        // Show duration
+        const durEl = $('#durationDisplay');
+        if (durEl) durEl.textContent = `녹음 ${formatDuration(state.recordingSeconds)}`;
+        // Clear title for new entry
+        state.recordingTitle = '';
+        $('#recordTitle').value = '';
         navigateTo('edit');
     });
+}
+
+function formatDate(date) {
+    const y = date.getFullYear();
+    const m = String(date.getMonth() + 1).padStart(2, '0');
+    const d = String(date.getDate()).padStart(2, '0');
+    const h = String(date.getHours()).padStart(2, '0');
+    const min = String(date.getMinutes()).padStart(2, '0');
+    return `${y}.${m}.${d} ${h}:${min}`;
+}
+
+function formatDuration(seconds) {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    if (m > 0) return `${m}분 ${s}초`;
+    return `${s}초`;
 }
 
 function toggleRecording() {
@@ -189,9 +278,10 @@ async function startRecording() {
     }
 
     try {
-        // Get microphone access for visualization
+        // Get microphone access for visualization AND audio recording
         state.mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true });
         setupAudioVisualizer(state.mediaStream);
+        startAudioRecording(state.mediaStream);
     } catch (err) {
         showToast('마이크 접근이 거부되었습니다. 브라우저 설정을 확인해주세요.', 'error');
         return;
@@ -269,6 +359,43 @@ async function startRecording() {
     }, 1000);
 }
 
+// ============= Audio Recording (MediaRecorder) =============
+function startAudioRecording(stream) {
+    state.audioChunks = [];
+    state.audioBlob = null;
+
+    try {
+        const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+            ? 'audio/webm;codecs=opus'
+            : MediaRecorder.isTypeSupported('audio/mp4')
+                ? 'audio/mp4'
+                : 'audio/webm';
+
+        state.mediaRecorder = new MediaRecorder(stream, { mimeType });
+
+        state.mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                state.audioChunks.push(e.data);
+            }
+        };
+
+        state.mediaRecorder.onstop = () => {
+            state.audioBlob = new Blob(state.audioChunks, { type: state.mediaRecorder.mimeType });
+        };
+
+        state.mediaRecorder.start(1000); // Collect data every second
+    } catch (err) {
+        console.warn('MediaRecorder not available, audio will not be saved:', err);
+        state.mediaRecorder = null;
+    }
+}
+
+function stopAudioRecording() {
+    if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+        state.mediaRecorder.stop();
+    }
+}
+
 function stopRecording() {
     state.isRecording = false;
 
@@ -278,11 +405,16 @@ function stopRecording() {
         state.recognition = null;
     }
 
-    // Stop audio
-    if (state.mediaStream) {
-        state.mediaStream.getTracks().forEach((t) => t.stop());
-        state.mediaStream = null;
-    }
+    // Stop audio recording
+    stopAudioRecording();
+
+    // Stop media stream (after MediaRecorder stops)
+    setTimeout(() => {
+        if (state.mediaStream) {
+            state.mediaStream.getTracks().forEach((t) => t.stop());
+            state.mediaStream = null;
+        }
+    }, 200);
 
     if (state.audioContext) {
         state.audioContext.close();
@@ -408,10 +540,12 @@ function initEditScreen() {
             return;
         }
         if (!state.apiKey) {
-            showToast('설정에서 Claude API 키를 입력해주세요.', 'error');
+            showToast('설정에서 Gemini API 키를 입력해주세요.', 'error');
             $('#settingsModal').classList.add('open');
             return;
         }
+        // Save title from input
+        state.recordingTitle = $('#recordTitle').value.trim() || '제목 없음';
         processWithAI(text);
     });
 }
@@ -443,23 +577,22 @@ async function processWithAI(text) {
 ${text}`;
 
     try {
-        const response = await fetch(CONFIG.API_URL, {
+        const apiUrl = `${CONFIG.API_BASE}/${state.model}:generateContent?key=${state.apiKey}`;
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'x-api-key': state.apiKey,
-                'anthropic-version': CONFIG.API_VERSION,
-                'anthropic-dangerous-direct-browser-access': 'true',
             },
             body: JSON.stringify({
-                model: state.model,
-                max_tokens: CONFIG.MAX_TOKENS,
-                messages: [
-                    {
-                        role: 'user',
-                        content: prompt,
-                    },
-                ],
+                contents: [{
+                    role: 'user',
+                    parts: [{ text: prompt }],
+                }],
+                generationConfig: {
+                    temperature: 0.3,
+                    maxOutputTokens: CONFIG.MAX_TOKENS,
+                    responseMimeType: 'application/json',
+                },
             }),
         });
 
@@ -469,37 +602,63 @@ ${text}`;
         }
 
         const data = await response.json();
-        const content = data.content[0].text;
+        const content = data.candidates?.[0]?.content?.parts?.[0]?.text;
+
+        if (!content) {
+            throw new Error('AI가 응답을 생성하지 못했습니다.');
+        }
 
         // Parse JSON from response
         let results;
         try {
+            results = JSON.parse(content);
+        } catch (parseErr) {
             // Try to find JSON in the response
             const jsonMatch = content.match(/\{[\s\S]*\}/);
             if (jsonMatch) {
                 results = JSON.parse(jsonMatch[0]);
             } else {
-                throw new Error('JSON 형식을 찾을 수 없습니다.');
+                console.error('JSON parse error:', parseErr);
+                results = {
+                    summary: content,
+                    meeting_notes: '파싱 오류가 발생했습니다. 요점정리 탭을 확인해주세요.',
+                    todos: '- [ ] 파싱 오류로 할 일 목록을 생성할 수 없습니다.',
+                    mindmap: 'mindmap\n  root(결과)\n    파싱 오류 발생',
+                };
             }
-        } catch (parseErr) {
-            console.error('JSON parse error:', parseErr);
-            // Fallback: use raw content
-            results = {
-                summary: content,
-                meeting_notes: '파싱 오류가 발생했습니다. 요점정리 탭을 확인해주세요.',
-                todos: '- [ ] 파싱 오류로 할 일 목록을 생성할 수 없습니다.',
-                mindmap: 'mindmap\n  root(결과)\n    파싱 오류 발생',
-            };
         }
 
         state.results = results;
         displayResults(results);
         navigateTo('results');
         showToast('AI 정리가 완료되었습니다!', 'success');
+
+        // Auto-save to IndexedDB
+        await autoSaveRecord(text, results);
+
     } catch (err) {
         console.error('AI processing error:', err);
         showToast(`오류: ${err.message}`, 'error');
         navigateTo('edit');
+    }
+}
+
+// ============= Auto-save Record =============
+async function autoSaveRecord(transcript, results) {
+    try {
+        const record = {
+            id: Date.now(),
+            title: state.recordingTitle || '제목 없음',
+            date: (state.recordingDate || new Date()).toISOString(),
+            duration: state.recordingSeconds,
+            transcript: transcript,
+            results: results,
+            audioBlob: state.audioBlob || null,
+        };
+        await saveRecord(record);
+        showToast('기록이 자동 저장되었습니다.', 'info');
+    } catch (err) {
+        console.warn('기록 저장 실패:', err);
     }
 }
 
@@ -539,7 +698,8 @@ function initResults() {
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `voicenote_${new Date().toISOString().slice(0, 10)}.md`;
+        const title = state.recordingTitle || 'voicenote';
+        a.download = `${title}_${new Date().toISOString().slice(0, 10)}.md`;
         a.click();
         URL.revokeObjectURL(url);
         showToast('파일이 다운로드되었습니다.', 'success');
@@ -552,6 +712,10 @@ function initResults() {
         state.interimTranscript = '';
         state.results = null;
         state.recordingSeconds = 0;
+        state.recordingTitle = '';
+        state.recordingDate = null;
+        state.audioBlob = null;
+        state.audioChunks = [];
 
         // Reset UI
         $('#transcriptFinal').textContent = '';
@@ -675,13 +839,154 @@ async function renderMindmap(mermaidCode) {
     }
 }
 
+// ============= History Screen =============
+function initHistory() {
+    $('#historyBtn').addEventListener('click', () => {
+        loadHistory();
+        navigateTo('history');
+    });
+}
+
+async function loadHistory() {
+    const listEl = $('#historyList');
+    const countEl = $('#historyCount');
+
+    try {
+        const records = await getAllRecords();
+        countEl.textContent = `${records.length}건`;
+
+        if (records.length === 0) {
+            listEl.innerHTML = `
+                <div class="history-empty">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="opacity:0.3">
+                        <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                    </svg>
+                    <p>아직 저장된 녹음이 없습니다.</p>
+                    <p class="history-empty-sub">녹음 후 AI 정리를 완료하면 자동으로 저장됩니다.</p>
+                </div>`;
+            return;
+        }
+
+        listEl.innerHTML = records.map(rec => {
+            const date = new Date(rec.date);
+            const dateStr = formatDate(date);
+            const durationStr = formatDuration(rec.duration || 0);
+            const previewText = (rec.transcript || '').substring(0, 80) + ((rec.transcript || '').length > 80 ? '...' : '');
+            const hasAudio = !!rec.audioBlob;
+
+            return `
+                <div class="history-card" data-id="${rec.id}">
+                    <div class="history-card-top">
+                        <div class="history-card-info">
+                            <h3 class="history-title">${escapeHtml(rec.title || '제목 없음')}</h3>
+                            <div class="history-meta">
+                                <span class="history-date">${dateStr}</span>
+                                <span class="history-dot">·</span>
+                                <span class="history-duration">${durationStr}</span>
+                            </div>
+                        </div>
+                        <button class="history-delete icon-btn-sm" data-id="${rec.id}" title="삭제">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                        </button>
+                    </div>
+                    <p class="history-preview">${escapeHtml(previewText)}</p>
+                    <div class="history-card-actions">
+                        ${hasAudio ? `<button class="history-play btn-ghost" data-id="${rec.id}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+                            재생
+                        </button>` : '<span class="history-no-audio">오디오 없음</span>'}
+                        <button class="history-view btn-ghost" data-id="${rec.id}">
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                            AI 결과 보기
+                        </button>
+                    </div>
+                    <div class="history-audio-player hidden" id="player-${rec.id}"></div>
+                </div>`;
+        }).join('');
+
+        // Bind events
+        listEl.querySelectorAll('.history-delete').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const id = Number(btn.dataset.id);
+                if (confirm('이 녹음 기록을 삭제하시겠습니까?')) {
+                    await deleteRecord(id);
+                    showToast('기록이 삭제되었습니다.', 'success');
+                    loadHistory();
+                }
+            });
+        });
+
+        listEl.querySelectorAll('.history-play').forEach(btn => {
+            btn.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const id = Number(btn.dataset.id);
+                toggleAudioPlayer(id, records);
+            });
+        });
+
+        listEl.querySelectorAll('.history-view').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = Number(btn.dataset.id);
+                const rec = records.find(r => r.id === id);
+                if (rec && rec.results) {
+                    state.results = rec.results;
+                    state.recordingTitle = rec.title;
+                    displayResults(rec.results);
+                    navigateTo('results');
+                }
+            });
+        });
+
+    } catch (err) {
+        console.error('기록 로드 실패:', err);
+        listEl.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:40px;">기록을 불러올 수 없습니다.</p>';
+    }
+}
+
+function toggleAudioPlayer(id, records) {
+    const playerEl = $(`#player-${id}`);
+    if (!playerEl) return;
+
+    if (!playerEl.classList.contains('hidden')) {
+        playerEl.classList.add('hidden');
+        playerEl.innerHTML = '';
+        return;
+    }
+
+    const rec = records.find(r => r.id === id);
+    if (!rec || !rec.audioBlob) {
+        showToast('오디오 파일이 없습니다.', 'error');
+        return;
+    }
+
+    const audioUrl = URL.createObjectURL(rec.audioBlob);
+    playerEl.innerHTML = `<audio controls src="${audioUrl}" style="width:100%;height:40px;border-radius:8px;"></audio>`;
+    playerEl.classList.remove('hidden');
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
 // ============= Demo Mode =============
 function runDemoMode() {
     const demoTranscript =
         '오늘 회의에서는 3분기 마케팅 전략에 대해 논의했습니다. 김 팀장이 SNS 캠페인 결과를 보고했고, 전환율이 15% 상승했다고 합니다. 이 대리는 신규 제품 런칭 일정을 10월 초로 제안했고, 모두 동의했습니다. 박 과장은 고객 피드백 분석 결과를 공유했는데, 가격 대비 품질에 대한 만족도가 높았습니다. 다음 주까지 각 팀별로 4분기 예산안을 제출하기로 했고, 신규 채용 면접은 다음 주 수요일에 진행하기로 했습니다. 또한 해외 진출 관련해서 동남아 시장 조사가 필요하다는 의견이 있었고, 이에 대한 보고서를 2주 내로 준비하기로 했습니다.';
 
     state.transcript = demoTranscript;
+    state.recordingDate = new Date();
+    state.recordingTitle = '데모 회의';
+    state.recordingSeconds = 45;
+
     $('#editArea').value = demoTranscript;
+    $('#recordTitle').value = '데모 회의';
+    $('#recordDate').textContent = formatDate(state.recordingDate);
+    const durEl = $('#durationDisplay');
+    if (durEl) durEl.textContent = `녹음 ${formatDuration(45)}`;
     updateTextStats();
 
     const demoResults = {

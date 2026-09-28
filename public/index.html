@@ -32,14 +32,14 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label for="apiKeyInput">Claude API 키</label>
+                    <label for="apiKeyInput">Gemini API 키</label>
                     <div class="input-wrapper">
-                        <input type="password" id="apiKeyInput" placeholder="sk-ant-api03-..." autocomplete="off">
+                        <input type="password" id="apiKeyInput" placeholder="AIzaSy..." autocomplete="off">
                         <button id="toggleApiKey" class="icon-btn-sm" aria-label="API 키 보기/숨기기">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                         </button>
                     </div>
-                    <p class="form-hint">프로토타입용으로 브라우저에서 직접 API를 호출합니다.<br>실서비스에서는 백엔드 프록시를 사용해야 합니다.</p>
+                    <p class="form-hint"><a href="https://aistudio.google.com/apikey" target="_blank" style="color:#818cf8;">Google AI Studio</a>에서 무료 API 키를 발급받으세요.</p>
                 </div>
                 <div class="form-group">
                     <label for="langSelect">음성 인식 언어</label>
@@ -51,10 +51,9 @@
                     </select>
                 </div>
                 <div class="form-group">
-                    <label for="modelSelect">Claude 모델</label>
+                    <label for="modelSelect">Gemini 모델</label>
                     <select id="modelSelect">
-                        <option value="claude-sonnet-4-20250514" selected>Claude Sonnet 4</option>
-                        <option value="claude-opus-4-20250514">Claude Opus 4</option>
+                        <option value="gemini-3.5-flash" selected>Gemini 3.5 Flash</option>
                     </select>
                 </div>
             </div>
@@ -87,6 +86,9 @@
                 </div>
             </div>
             <div class="header-right">
+                <button id="historyBtn" class="icon-btn" aria-label="기록" title="녹음 기록">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </button>
                 <button id="settingsBtn" class="icon-btn" aria-label="설정">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
                 </button>
@@ -142,6 +144,19 @@
         <!-- Screen: Edit -->
         <main id="screenEdit" class="screen">
             <div class="edit-container">
+                <!-- 녹음 메타데이터 -->
+                <div class="edit-meta">
+                    <div class="edit-meta-row">
+                        <div class="edit-meta-field">
+                            <label for="recordTitle">녹음 제목</label>
+                            <input type="text" id="recordTitle" placeholder="예: 주간회의, 수업 메모...">
+                        </div>
+                        <div class="edit-meta-field edit-meta-date">
+                            <label>날짜</label>
+                            <span id="recordDate" class="meta-date-display">--</span>
+                        </div>
+                    </div>
+                </div>
                 <div class="edit-card">
                     <div class="edit-card-header">
                         <h2>녹음 텍스트 편집</h2>
@@ -154,6 +169,8 @@
                         <span id="wordCount">0 단어</span>
                         <span class="stats-divider">·</span>
                         <span id="charCount">0 자</span>
+                        <span class="stats-divider">·</span>
+                        <span id="durationDisplay"></span>
                     </div>
                 </div>
                 <button id="aiBtn" class="btn-primary btn-ai">
@@ -231,6 +248,25 @@
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
                         새 녹음
                     </button>
+                </div>
+            </div>
+        </main>
+
+        <!-- Screen: History -->
+        <main id="screenHistory" class="screen">
+            <div class="history-container">
+                <div class="history-header">
+                    <h2>녹음 기록</h2>
+                    <span id="historyCount" class="history-count">0건</span>
+                </div>
+                <div id="historyList" class="history-list">
+                    <div class="history-empty">
+                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" style="opacity:0.3">
+                            <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
+                        </svg>
+                        <p>아직 저장된 녹음이 없습니다.</p>
+                        <p class="history-empty-sub">녹음 후 AI 정리를 완료하면 자동으로 저장됩니다.</p>
+                    </div>
                 </div>
             </div>
         </main>
