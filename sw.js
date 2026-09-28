@@ -4,7 +4,7 @@
 // Network First for API calls
 // ============================================
 
-const CACHE_NAME = 'voicenote-ai-v2';
+const CACHE_NAME = 'voicenote-ai-v3';
 const STATIC_ASSETS = [
     '/',
     '/index.html',
