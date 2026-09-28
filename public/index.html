@@ -42,6 +42,11 @@
                     <p class="form-hint"><a href="https://aistudio.google.com/apikey" target="_blank" style="color:#818cf8;">Google AI Studio</a>에서 무료 API 키를 발급받으세요.</p>
                 </div>
                 <div class="form-group">
+                    <label for="customVocabInput">학교 전용 단어장 (고유명사/용어 사전)</label>
+                    <textarea id="customVocabInput" placeholder="예: 세인학교, 홍길동, 융합수업, AI보조교사..." rows="3" style="width:100%; border-radius:8px; border:1px solid #334155; background:#1e293b; color:#f8fafc; padding:0.75rem; font-family:inherit; resize:vertical;"></textarea>
+                    <p class="form-hint" style="margin-top:0.5rem;">AI가 오타를 교정할 때 참고할 사람 이름이나 학교 특수 용어를 쉼표로 구분하여 적어주세요.</p>
+                </div>
+                <div class="form-group">
                     <label for="langSelect">음성 인식 언어</label>
                     <select id="langSelect">
                         <option value="ko-KR" selected>한국어 (ko-KR)</option>

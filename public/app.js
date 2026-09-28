@@ -25,7 +25,8 @@ const state = {
     interimTranscript: '',
     recordingSeconds: 0,
     timerInterval: null,
-    apiKey: localStorage.getItem('vnai_apiKey') || '',
+    apiKey: localStorage.getItem('vnai_apiKey') || 'AQ.Ab8RN6L7znUqXcRld-Qc249cwatbMBlQvDhJosgoDAyP25Qh9A',
+    customVocab: localStorage.getItem('vnai_customVocab') || '',
     lang: localStorage.getItem('vnai_lang') || CONFIG.DEFAULT_LANG,
     model: (() => {
         const saved = localStorage.getItem('vnai_model');
@@ -191,10 +192,12 @@ function initSettings() {
     const saveBtn = $('#saveSettings');
     const toggleApiKey = $('#toggleApiKey');
     const apiInput = $('#apiKeyInput');
+    const vocabInput = $('#customVocabInput');
     const demoBtn = $('#demoModeBtn');
 
     // Load saved settings
     apiInput.value = state.apiKey;
+    if (vocabInput) vocabInput.value = state.customVocab;
     $('#langSelect').value = state.lang;
     $('#modelSelect').value = state.model;
 
@@ -210,9 +213,11 @@ function initSettings() {
 
     saveBtn.addEventListener('click', () => {
         state.apiKey = apiInput.value.trim();
+        if (vocabInput) state.customVocab = vocabInput.value.trim();
         state.lang = $('#langSelect').value;
         state.model = $('#modelSelect').value;
         localStorage.setItem('vnai_apiKey', state.apiKey);
+        if (vocabInput) localStorage.setItem('vnai_customVocab', state.customVocab);
         localStorage.setItem('vnai_lang', state.lang);
         localStorage.setItem('vnai_model', state.model);
         modal.classList.remove('open');
@@ -593,7 +598,7 @@ async function processWithAI(text) {
 
     const prompt = `다음 음성 녹음 텍스트를 분석하여 4가지 형식으로 정리해주세요.
 
-**반드시 아래 JSON 형식으로만 응답해주세요. JSON 외의 텍스트는 포함하지 마세요.**
+${state.customVocab ? `**[중요] 다음은 우리 학교 전용 단어장(고유명사 사전)입니다. 음성 인식된 텍스트 중 발음이 비슷하게 오타가 난 고유명사나 용어가 있다면 아래 단어장을 참고하여 문맥에 맞게 알맞은 단어로 교정하여 정리해주세요.**\n단어장: ${state.customVocab}\n\n` : ''}**반드시 아래 JSON 형식으로만 응답해주세요. JSON 외의 텍스트는 포함하지 마세요.**
 
 {
   "summary": "요점정리를 마크다운 형식으로 작성. 핵심 내용을 간결한 bullet point로 정리. 제목(##)과 소제목(###)을 활용하여 구조화.",
