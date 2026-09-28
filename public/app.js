@@ -19,7 +19,7 @@ const CONFIG = {
 
 // ============= Firebase Setup =============
 const firebaseConfig = {
-  apiKey: "AIzaSyC-hSCkZFy8WhjLrGOtuXRw9Blq4cvgDD8",
+  apiKey: "AIzaSyC-hSCkZFy8WhjLrG0tuXRw9Blq4cvgDD8",
   authDomain: "voicenote-ai-298af.firebaseapp.com",
   projectId: "voicenote-ai-298af",
   storageBucket: "voicenote-ai-298af.firebasestorage.app",
