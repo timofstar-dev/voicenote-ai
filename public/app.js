@@ -40,6 +40,7 @@ const state = {
     mediaStream: null,
     animFrameId: null,
     // New: recording metadata
+    recordingId: null,
     recordingTitle: '',
     recordingDate: null,
     // New: audio recording
@@ -233,15 +234,15 @@ function initRecording() {
     editBtn.addEventListener('click', () => {
         $('#editArea').value = state.transcript;
         updateTextStats();
-        // Set recording date
-        state.recordingDate = new Date();
+        // Set recording date if not set
+        if (!state.recordingDate) state.recordingDate = new Date();
         $('#recordDate').textContent = formatDate(state.recordingDate);
         // Show duration
         const durEl = $('#durationDisplay');
         if (durEl) durEl.textContent = `녹음 ${formatDuration(state.recordingSeconds)}`;
-        // Clear title for new entry
-        state.recordingTitle = '';
-        $('#recordTitle').value = '';
+        
+        // Pre-fill title input with current title
+        $('#recordTitle').value = state.recordingTitle || '';
         navigateTo('edit');
     });
 }
@@ -357,6 +358,13 @@ async function startRecording() {
         state.recordingSeconds++;
         updateTimerDisplay();
     }, 1000);
+
+    // Reset recordingId if starting fresh
+    if (!state.transcript.trim()) {
+        state.recordingId = null;
+        state.recordingDate = null;
+        state.recordingTitle = '';
+    }
 }
 
 // ============= Audio Recording (MediaRecorder) =============
@@ -453,6 +461,27 @@ function stopRecording() {
     // Show edit button if there's text
     if (state.transcript.trim()) {
         $('#editBtn').classList.remove('hidden');
+
+        // Auto save raw log immediately so it appears in history
+        if (!state.recordingId) {
+            state.recordingId = Date.now();
+            state.recordingDate = new Date();
+            const dateStr = formatDate(state.recordingDate);
+            const hours = state.recordingDate.getHours().toString().padStart(2, '0');
+            const mins = state.recordingDate.getMinutes().toString().padStart(2, '0');
+            state.recordingTitle = `${dateStr} ${hours}:${mins} 녹음`;
+        }
+        
+        const record = {
+            id: state.recordingId,
+            title: state.recordingTitle,
+            date: state.recordingDate.toISOString(),
+            duration: state.recordingSeconds,
+            transcript: state.transcript,
+            results: null,
+            audioBlob: state.audioBlob || null,
+        };
+        saveRecord(record).catch(err => console.warn('임시 저장 실패:', err));
     } else {
         showToast('텍스트가 인식되지 않았습니다. 다시 시도해주세요.', 'error');
     }
@@ -647,7 +676,7 @@ ${text}`;
 async function autoSaveRecord(transcript, results) {
     try {
         const record = {
-            id: Date.now(),
+            id: state.recordingId || Date.now(),
             title: state.recordingTitle || '제목 없음',
             date: (state.recordingDate || new Date()).toISOString(),
             duration: state.recordingSeconds,
