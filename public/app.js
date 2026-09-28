@@ -190,13 +190,10 @@ function initSettings() {
     const modal = $('#settingsModal');
     const closeBtn = $('#closeSettings');
     const saveBtn = $('#saveSettings');
-    const toggleApiKey = $('#toggleApiKey');
-    const apiInput = $('#apiKeyInput');
     const vocabInput = $('#customVocabInput');
     const demoBtn = $('#demoModeBtn');
 
     // Load saved settings
-    apiInput.value = state.apiKey;
     if (vocabInput) vocabInput.value = state.customVocab;
     $('#langSelect').value = state.lang;
     $('#modelSelect').value = state.model;
@@ -207,16 +204,10 @@ function initSettings() {
         if (e.target === modal) modal.classList.remove('open');
     });
 
-    toggleApiKey.addEventListener('click', () => {
-        apiInput.type = apiInput.type === 'password' ? 'text' : 'password';
-    });
-
     saveBtn.addEventListener('click', () => {
-        state.apiKey = apiInput.value.trim();
         if (vocabInput) state.customVocab = vocabInput.value.trim();
         state.lang = $('#langSelect').value;
         state.model = $('#modelSelect').value;
-        localStorage.setItem('vnai_apiKey', state.apiKey);
         if (vocabInput) localStorage.setItem('vnai_customVocab', state.customVocab);
         localStorage.setItem('vnai_lang', state.lang);
         localStorage.setItem('vnai_model', state.model);
