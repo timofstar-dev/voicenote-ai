@@ -82,6 +82,8 @@
                 </div>
             </div>
             <div class="header-right">
+                <button id="loginBtn" class="btn-primary-sm" style="margin-right:8px; border-radius:12px;">로그인</button>
+                <button id="logoutBtn" class="btn-ghost hidden" style="margin-right:8px; border-radius:12px;">로그아웃</button>
                 <button id="historyBtn" class="icon-btn" aria-label="기록" title="녹음 기록">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
                 </button>
@@ -280,6 +282,10 @@
 
     <script src="https://cdn.jsdelivr.net/npm/marked@12.0.1/marked.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.1/dist/mermaid.min.js"></script>
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
     <script src="app.js"></script>
     <script>
         // Register Service Worker

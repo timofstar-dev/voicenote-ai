@@ -17,6 +17,25 @@ const CONFIG = {
     STORE_NAME: 'recordings',
 };
 
+// ============= Firebase Setup =============
+const firebaseConfig = {
+  apiKey: "AIzaSyC-hSCkZFy8WhjLrGOtuXRw9Blq4cvgDD8",
+  authDomain: "voicenote-ai-298af.firebaseapp.com",
+  projectId: "voicenote-ai-298af",
+  storageBucket: "voicenote-ai-298af.firebasestorage.app",
+  messagingSenderId: "333655410702",
+  appId: "1:333655410702:web:093307374aa390608dd45f"
+};
+let auth = null;
+let db = null;
+let currentUser = null;
+
+if (typeof firebase !== 'undefined') {
+    firebase.initializeApp(firebaseConfig);
+    auth = firebase.auth();
+    db = firebase.firestore();
+}
+
 // ============= Application State =============
 const state = {
     currentScreen: 'record',
@@ -109,8 +128,60 @@ document.addEventListener('DOMContentLoaded', () => {
     initHistory();
     initInstallPrompt();
     updateTabIndicator();
+    initAuth();
     window.addEventListener('resize', updateTabIndicator);
 });
+
+// ============= Authentication =============
+function initAuth() {
+    if (!auth) return;
+    
+    const loginBtn = $('#loginBtn');
+    const logoutBtn = $('#logoutBtn');
+    
+    auth.onAuthStateChanged((user) => {
+        if (user) {
+            currentUser = user;
+            if (loginBtn) loginBtn.classList.add('hidden');
+            if (logoutBtn) logoutBtn.classList.remove('hidden');
+            
+            // Load customVocab from Firestore
+            db.collection('users').doc(user.uid).get().then(doc => {
+                if (doc.exists && doc.data().customVocab !== undefined) {
+                    state.customVocab = doc.data().customVocab;
+                    localStorage.setItem('vnai_customVocab', state.customVocab);
+                    const vocabInput = $('#customVocabInput');
+                    if (vocabInput) vocabInput.value = state.customVocab;
+                }
+            }).catch(err => console.warn('Firestore 읽기 실패:', err));
+            
+        } else {
+            currentUser = null;
+            if (loginBtn) loginBtn.classList.remove('hidden');
+            if (logoutBtn) logoutBtn.classList.add('hidden');
+        }
+    });
+
+    if (loginBtn) {
+        loginBtn.addEventListener('click', () => {
+            const provider = new firebase.auth.GoogleAuthProvider();
+            auth.signInWithPopup(provider).then(() => {
+                showToast('로그인 되었습니다.', 'success');
+            }).catch(err => {
+                console.error(err);
+                showToast('로그인에 실패했습니다.', 'error');
+            });
+        });
+    }
+    
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            auth.signOut().then(() => {
+                showToast('로그아웃 되었습니다.', 'info');
+            });
+        });
+    }
+}
 
 function initMermaid() {
     if (typeof mermaid !== 'undefined') {
@@ -211,6 +282,13 @@ function initSettings() {
         if (vocabInput) localStorage.setItem('vnai_customVocab', state.customVocab);
         localStorage.setItem('vnai_lang', state.lang);
         localStorage.setItem('vnai_model', state.model);
+        
+        if (currentUser && db) {
+            db.collection('users').doc(currentUser.uid).set({
+                customVocab: state.customVocab
+            }, { merge: true }).catch(err => console.warn('Firestore 저장 실패:', err));
+        }
+
         modal.classList.remove('open');
         showToast('설정이 저장되었습니다.', 'success');
     });
